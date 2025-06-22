@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MediaPipe Live Pose Tracker</title>
+  <title>MediaPipe Pose Exercise Tracker</title>
   <style>
-    body { margin: 0; font-family: sans-serif; }
-    #container { position: relative; width: 640px; height: 480px; margin: auto; }
-    video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+    body { margin: 0; font-family: sans-serif; background: #f0f0f0; }
+    #container { position: relative; width: 640px; height: 480px; margin: 20px auto; }
+    video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 8px; }
     #message {
       position: absolute;
-      top: 10px;
+      top: -40px;
       left: 50%;
       transform: translateX(-50%);
       background: rgba(0,0,0,0.6);
@@ -19,12 +19,74 @@
       border-radius: 4px;
       font-size: 14px;
       z-index: 2;
+      white-space: nowrap;
+    }
+    #controls {
+      text-align: center;
+      margin: 20px auto;
+      max-width: 640px;
+    }
+    #exercise-selector {
+      margin-bottom: 20px;
+    }
+    select, button {
+      padding: 10px 15px;
+      font-size: 16px;
+      border: none;
+      border-radius: 4px;
+      margin: 0 5px;
+    }
+    select {
+      background: white;
+      border: 1px solid #ccc;
+    }
+    button {
+      background: #007acc;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #005a9e;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    #exercise-info {
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    #exercise-info h3 {
+      margin: 0 0 10px 0;
+      color: #333;
+    }
+    #exercise-info p {
+      margin: 5px 0;
+      color: #666;
     }
   </style>
 </head>
 <body>
+  <div id="controls">    <div id="exercise-selector">
+      <select id="exercise-select">
+        <option value="">Select an exercise...</option>
+        <!-- Options will be populated dynamically -->
+      </select>
+      <button id="start-btn" disabled>Start Exercise</button>
+      <button id="reset-btn" disabled>Reset</button>
+    </div>
+    
+    <div id="exercise-info" style="display: none;">
+      <h3 id="exercise-title"></h3>
+      <p id="exercise-description"></p>
+    </div>
+  </div>
+
   <div id="container">
-    <div id="message">Ensure you're on HTTPS and have granted camera permission.</div>
+    <div id="message">Select an exercise above to begin</div>
     <video id="input_video" autoplay muted playsinline></video>
     <canvas id="output_canvas"></canvas>
   </div>
@@ -32,130 +94,209 @@
   <!-- MediaPipe JS libraries -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js"></script>  <!-- Exercise scripts -->
+  <script src="pose_utils.js"></script>
   <script src="lateral_neck_tilt.js"></script>
+  <script src="neck_rotation.js"></script>
+  <script src="overhead_reach.js"></script>
+  <script src="thoracic_extension.js"></script>
+  <script src="exercise_manager.js"></script>
+  
   <script>
+    // Global variables
     const videoElement = document.getElementById('input_video');
     const canvasElement = document.getElementById('output_canvas');
     const canvasCtx = canvasElement.getContext('2d');
     const messageEl = document.getElementById('message');
-    
-    // Exercise state management
-    let currentStep = 0; // 0: initial, 1: left tilt, 2: right tilt, 3: complete
-    let stepStartTime = null;
-    let stepHoldTime = 0;
-    const HOLD_DURATION = 2000; // 2 seconds hold required
-    
-    const stepNames = [
-      "Position yourself straight - shoulders and head level",
-      "Tilt your head to the LEFT",
-      "Tilt your head to the RIGHT", 
-      "Exercise Complete! Well done!"
-    ];
-    
-    const checkFunctions = [
-      checkInitialPosition,
-      checkLeftTilt,
-      checkRightTilt,
-      null // complete state
-    ];
-    
-    // Initialize MediaPipe Pose
-    const pose = new Pose({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
-    });
-    pose.setOptions({
-      modelComplexity: 1,
-      smoothLandmarks: true,
-      enableSegmentation: false,
-      smoothSegmentation: false,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
-    pose.onResults(onResults);
+    const exerciseSelect = document.getElementById('exercise-select');
+    const startBtn = document.getElementById('start-btn');
+    const resetBtn = document.getElementById('reset-btn');
+    const exerciseInfo = document.getElementById('exercise-info');
+    const exerciseTitle = document.getElementById('exercise-title');
+    const exerciseDescription = document.getElementById('exercise-description');
 
-    // Draw results on canvas
+    let exerciseManager = null;
+    let isExerciseActive = false;
+    let pose = null;
+    let camera = null;
+
+    // Exercise selection handling
+    exerciseSelect.addEventListener('change', function() {
+      const selectedExercise = this.value;
+      if (selectedExercise) {
+        try {
+          const workflow = getExerciseWorkflow(selectedExercise);
+          exerciseTitle.textContent = workflow.name;
+          exerciseDescription.textContent = workflow.description;
+          exerciseInfo.style.display = 'block';
+          startBtn.disabled = false;
+        } catch (error) {
+          console.error('Error loading exercise:', error);
+          exerciseInfo.style.display = 'none';
+          startBtn.disabled = true;
+        }
+      } else {
+        exerciseInfo.style.display = 'none';
+        startBtn.disabled = true;
+      }
+    });
+
+    // Start exercise
+    startBtn.addEventListener('click', function() {
+      const selectedExercise = exerciseSelect.value;
+      if (selectedExercise) {
+        try {
+          const workflow = getExerciseWorkflow(selectedExercise);
+          exerciseManager = new ExerciseManager(workflow);
+          isExerciseActive = true;
+          startBtn.disabled = true;
+          resetBtn.disabled = false;
+          exerciseSelect.disabled = true;
+          
+          // Initialize camera if not already done
+          initializeCamera();
+          
+          messageEl.textContent = 'Starting exercise... Please ensure you are visible to the camera.';
+        } catch (error) {
+          console.error('Error starting exercise:', error);
+          messageEl.textContent = 'Error starting exercise. Please try again.';
+        }
+      }
+    });
+
+    // Reset exercise
+    resetBtn.addEventListener('click', function() {
+      if (exerciseManager) {
+        exerciseManager.reset();
+      }
+      isExerciseActive = false;
+      startBtn.disabled = false;
+      resetBtn.disabled = true;
+      exerciseSelect.disabled = false;
+      messageEl.textContent = 'Exercise reset. Click Start to begin again.';
+    });
+
+    // Initialize MediaPipe Pose
+    function initializePose() {
+      pose = new Pose({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
+      });
+      pose.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        enableSegmentation: false,
+        smoothSegmentation: false,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+      pose.onResults(onResults);
+    }
+
+    // Initialize camera
+    function initializeCamera() {
+      if (!camera) {
+        try {
+          camera = new Camera(videoElement, {
+            onFrame: async () => {
+              if (pose) {
+                await pose.send({ image: videoElement });
+              }
+            },
+            width: 640,
+            height: 480
+          });
+          camera.start().catch(error => handleCameraError(error));
+        } catch (error) {
+          handleCameraError(error);
+        }
+      }
+    }
+
+    // Process pose results
     function onResults(results) {
       canvasCtx.save();
       canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
       canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
       
-      // Update message with current step
-      updateStepMessage();
-      
       if (results.poseLandmarks) {
         drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { lineWidth: 1 });
         drawLandmarks(canvasCtx, results.poseLandmarks, { lineWidth: 1, radius: 1, color: '#FF0000'});
         
-        // Process current step
-        if (currentStep < 3) {
-          const checkFunction = checkFunctions[currentStep];
-          const result = checkFunction(results.poseLandmarks);
-          
-          if (result.ok) {
-            // Position is correct, start/continue timing
-            if (stepStartTime === null) {
-              stepStartTime = Date.now();
-            }
-            stepHoldTime = Date.now() - stepStartTime;
-            
-            // Check if held long enough
-            if (stepHoldTime >= HOLD_DURATION) {
-              // Move to next step
-              currentStep++;
-              stepStartTime = null;
-              stepHoldTime = 0;
-              console.log(`✅ Step ${currentStep} completed`);
-            }
-          } else {
-            // Position incorrect, reset timer
-            stepStartTime = null;
-            stepHoldTime = 0;
-            console.log(`❌ Step ${currentStep + 1}:`, result.issues);
-          }
+        // Process exercise if active
+        if (isExerciseActive && exerciseManager) {
+          const result = exerciseManager.processLandmarks(results.poseLandmarks);
+          updateExerciseMessage(result);
         }
       }
       canvasCtx.restore();
     }
-    
-    function updateStepMessage() {
-      const stepText = stepNames[currentStep];
-      let progressText = "";
+
+    // Update exercise message
+    function updateExerciseMessage(result) {
+      const currentStep = exerciseManager.getCurrentStep();
+      const stepNumber = exerciseManager.getCurrentStepNumber();
+      const totalSteps = exerciseManager.getTotalSteps();
       
-      if (currentStep < 3 && stepStartTime !== null) {
-        const remaining = Math.max(0, HOLD_DURATION - stepHoldTime);
-        progressText = ` - Hold for ${(remaining / 1000).toFixed(1)}s`;
-      }
+      let stepText = currentStep.name;
+      let progressText = exerciseManager.getProgressText();
       
-      messageEl.textContent = `Step ${currentStep + 1}/3: ${stepText}${progressText}`;
-      
-      // Color coding
-      if (currentStep === 3) {
+      if (currentStep.isComplete) {
+        messageEl.textContent = stepText;
         messageEl.style.background = 'rgba(0,128,0,0.8)'; // Green for complete
-      } else if (stepStartTime !== null) {
-        messageEl.style.background = 'rgba(255,165,0,0.8)'; // Orange for holding
+        isExerciseActive = false;
+        startBtn.disabled = false;
+        resetBtn.disabled = true;
+        exerciseSelect.disabled = false;
       } else {
-        messageEl.style.background = 'rgba(0,0,0,0.6)'; // Default
+        messageEl.textContent = `Step ${stepNumber}/${totalSteps}: ${stepText}${progressText}`;
+        
+        // Color coding
+        if (result.holding) {
+          messageEl.style.background = 'rgba(255,165,0,0.8)'; // Orange for holding
+        } else {
+          messageEl.style.background = 'rgba(0,0,0,0.6)'; // Default
+        }
       }
     }
 
-    // Start camera with error handling
-    try {
-      const camera = new Camera(videoElement, {
-        onFrame: async () => await pose.send({ image: videoElement }),
-        width: 640,
-        height: 480
-      });
-      camera.start().catch(error => handleCameraError(error));
-    } catch (error) {
-      handleCameraError(error);
-    }
-
+    // Handle camera errors
     function handleCameraError(error) {
       console.error('Camera start failed:', error);
       messageEl.textContent = `Error accessing camera: ${error.message}. Please check HTTPS and permissions.`;
       messageEl.style.background = 'rgba(255,0,0,0.7)';
+    }    // Initialize on page load
+    initializePose();
+    
+    // Populate exercise dropdown when page loads
+    function populateExerciseDropdown() {
+      const availableExercises = getAvailableExercises();
+      
+      // Clear existing options except the first one
+      while (exerciseSelect.children.length > 1) {
+        exerciseSelect.removeChild(exerciseSelect.lastChild);
+      }
+      
+      // Add available exercises
+      availableExercises.forEach(exerciseKey => {
+        try {
+          const workflow = getExerciseWorkflow(exerciseKey);
+          const option = document.createElement('option');
+          option.value = exerciseKey;
+          option.textContent = workflow.name;
+          exerciseSelect.appendChild(option);
+        } catch (error) {
+          console.warn(`Could not add exercise ${exerciseKey}:`, error);
+        }
+      });
+      
+      if (availableExercises.length === 0) {
+        messageEl.textContent = 'No exercises available. Please check that exercise files are loaded correctly.';
+        messageEl.style.background = 'rgba(255,165,0,0.8)';
+      }
     }
+    
+    // Wait a bit for all scripts to load, then populate dropdown
+    setTimeout(populateExerciseDropdown, 100);
   </script>
 </body>
 </html>

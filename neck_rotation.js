@@ -1,67 +1,20 @@
-const KEYMAPPER = {
-    0:"nose",1:"left_eye_inner",2:"left_eye",3:"left_eye_outer",4:"right_eye_inner",
-    5:"right_eye",6:"right_eye_outer",7:"left_ear",8:"right_ear",9:"mouth_left",
-    10:"mouth_right",11:"left_shoulder",12:"right_shoulder",13:"left_elbow",
-    14:"right_elbow",15:"left_wrist",16:"right_wrist",17:"left_pinky",18:"right_pinky",
-    19:"left_index",20:"right_index",21:"left_thumb",22:"right_thumb",23:"left_hip",
-    24:"right_hip",25:"left_knee",26:"right_knee",27:"left_ankle",28:"right_ankle",
-    29:"left_heel",30:"right_heel",31:"left_foot_index",32:"right_foot_index"
-};
-// quick reverse lookup: name → index
-const NAME2IDX = Object.fromEntries(
-    Object.entries(KEYMAPPER).map(([i,n]) => [n, parseInt(i,10)])
-);
-
-// --- maths helpers -------------------------------------------------------
-const deg = rad => rad * 180 / Math.PI;
-function angleBetween(p1, p2) {
-    const dx = p2.x - p1.x;
-    const dy = p2.y - p1.y;
-    return Math.abs(deg(Math.atan2(dy, dx)));   // |angle w.r.t. +x|
-}
-
-function distance(p1, p2) {
-    const dx = p2.x - p1.x;
-    const dy = p2.y - p1.y;
-    return Math.sqrt(dx * dx + dy * dy);
-}
-
 // returns { ok, issues[], metrics{} }
-function checkInitialPosition(lms, shoulderTol = 10, headTol = 10) {
-    const xy = name => lms[NAME2IDX[name]];          // landmark accessor
-
-    // measurements
-    const shoulderAngle = angleBetween(xy("right_shoulder"), xy("left_shoulder"));
-    const headAngle = angleBetween(xy("right_eye"), xy("left_eye"));
-
-    const issues = [];
-    if (shoulderAngle > shoulderTol) issues.push("shoulders_not_level");
-    if (headAngle > headTol) issues.push("head_not_level");
-
-    return {
-        ok: issues.length === 0,
-        issues,
-        metrics: {
-            shoulder_angle: { value: shoulderAngle, rule: `abs <= ${shoulderTol}` },
-            head_angle: { value: headAngle, rule: `abs <= ${headTol}` }
-        }
-    };
-}
-
-// returns { ok, issues[], metrics{} }
-function checkLeftRotation(lms, shoulderTol = 15, rotationThreshold = 0.15) {
+function checkLeftRotation(lms, shoulderTol = 15, rotationThreshold = 0.3, eyeAngleTol = 20) {
     const xy = name => lms[NAME2IDX[name]];          // landmark accessor
     
     // measurements
     const shoulderAngle = angleBetween(xy("right_shoulder"), xy("left_shoulder"));
+    const eyeAngle = angleBetween(xy("right_eye"), xy("left_eye"));
     const noseToLeftEye = distance(xy("nose"), xy("left_eye"));
     const noseToRightEye = distance(xy("nose"), xy("right_eye"));
     
     // For left rotation, nose should be closer to left eye than right eye
     const rotationRatio = noseToLeftEye / noseToRightEye;
+    console.log(`Rotation ratio (left): ${rotationRatio} (nose to left eye / nose to right eye)`);
     
     const issues = [];
     if (shoulderAngle > shoulderTol) issues.push("shoulders_not_level");
+    if (eyeAngle > eyeAngleTol) issues.push("head_tilted_while_rotating");
     if (rotationRatio > (1 - rotationThreshold)) issues.push("insufficient_left_rotation");
     
     return {
@@ -69,6 +22,7 @@ function checkLeftRotation(lms, shoulderTol = 15, rotationThreshold = 0.15) {
         issues,
         metrics: {
             shoulder_angle: { value: shoulderAngle, rule: `abs <= ${shoulderTol}` },
+            eye_angle: { value: eyeAngle, rule: `abs <= ${eyeAngleTol}` },
             rotation_ratio: { value: rotationRatio, rule: `<= ${1 - rotationThreshold} (left rotation)` },
             nose_to_left_eye: { value: noseToLeftEye },
             nose_to_right_eye: { value: noseToRightEye }
@@ -77,11 +31,12 @@ function checkLeftRotation(lms, shoulderTol = 15, rotationThreshold = 0.15) {
 }
 
 // returns { ok, issues[], metrics{} }
-function checkRightRotation(lms, shoulderTol = 15, rotationThreshold = 0.15) {
+function checkRightRotation(lms, shoulderTol = 15, rotationThreshold = 0.15, eyeAngleTol = 20) {
     const xy = name => lms[NAME2IDX[name]];          // landmark accessor
     
     // measurements
     const shoulderAngle = angleBetween(xy("right_shoulder"), xy("left_shoulder"));
+    const eyeAngle = angleBetween(xy("right_eye"), xy("left_eye"));
     const noseToLeftEye = distance(xy("nose"), xy("left_eye"));
     const noseToRightEye = distance(xy("nose"), xy("right_eye"));
     
@@ -90,6 +45,7 @@ function checkRightRotation(lms, shoulderTol = 15, rotationThreshold = 0.15) {
     
     const issues = [];
     if (shoulderAngle > shoulderTol) issues.push("shoulders_not_level");
+    if (eyeAngle > eyeAngleTol) issues.push("head_tilted_while_rotating");
     if (rotationRatio > (1 - rotationThreshold)) issues.push("insufficient_right_rotation");
     
     return {
@@ -97,9 +53,34 @@ function checkRightRotation(lms, shoulderTol = 15, rotationThreshold = 0.15) {
         issues,
         metrics: {
             shoulder_angle: { value: shoulderAngle, rule: `abs <= ${shoulderTol}` },
+            eye_angle: { value: eyeAngle, rule: `abs <= ${eyeAngleTol}` },
             rotation_ratio: { value: rotationRatio, rule: `<= ${1 - rotationThreshold} (right rotation)` },
             nose_to_left_eye: { value: noseToLeftEye },
             nose_to_right_eye: { value: noseToRightEye }
         }
     };
 }
+
+// Exercise workflow definition
+const NECK_ROTATION_WORKFLOW = {
+    name: "Neck Rotation",
+    description: "Turn your head to look over one shoulder without moving your torso.",
+    holdDuration: 3000, // 3 seconds per step (as per templates.json)
+    steps: [
+        {
+            name: "Position yourself straight - shoulders and head level",
+            checkFunction: checkInitialPosition,
+            instruction: "Sit tall with spine neutral, shoulders level"
+        },
+        {
+            name: "Rotate your head to the LEFT",
+            checkFunction: checkLeftRotation,
+            instruction: "Slowly rotate your head to the left until you feel a stretch"
+        },
+        {
+            name: "Rotate your head to the RIGHT",
+            checkFunction: checkRightRotation,
+            instruction: "Slowly rotate your head to the right until you feel a stretch"
+        }
+    ]
+};

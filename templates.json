@@ -26,21 +26,6 @@
     "holdSecs": 3,
     "benefit": "Mobilises sternocleidomastoid and levator scapulae; reduces neck stiffness."
   },
-
-  "chin_tuck": {
-    "description": "Slide your chin straight back, creating a “double-chin,” to align head over spine.",
-    "howToDo": [
-      "Face forward, eyes level.",
-      "Without tilting the head, draw chin straight backward.",
-      "Feel lengthening at the back of the neck.",
-      "Maintain 3 s, then relax."
-    ],
-    "trackingMetric": "Change in sagittal distance nose→ear; head tilt (pitch).",
-    "matchRule": "Δ(nose→ear) ≥ 10 mm AND head pitch < 5°",
-    "holdSecs": 3,
-    "benefit": "Counters forward-head posture from screen use."
-  },
-
   "overhead_reach": {
     "description": "Lift both arms overhead, biceps next to ears, ribs down.",
     "howToDo": [
