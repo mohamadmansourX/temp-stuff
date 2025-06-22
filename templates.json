@@ -53,30 +53,14 @@
     "holdSecs": 3,
     "benefit": "Reverses thoracic kyphosis and promotes upright posture."
   },
-
-  "chest_opener": {
-    "description": "Clasp hands behind back, straighten arms, and gently lift.",
-    "howToDo": [
-      "Interlace fingers behind hips.",
-      "Straighten arms and lift knuckles away from body.",
-      "Squeeze shoulder blades together.",
-      "Hold the stretch."
-    ],
-    "trackingMetric": "Wrists’ z-coordinate behind hips; elbow-shoulder-hip angle.",
-    "matchRule": "wrists behind hips AND angle > 190°",
-    "holdSecs": 3,
-    "benefit": "Stretches pectoral muscles and anterior shoulders."
-  },
-
   "shoulder_rolls": {
-    "description": "Slow circular shrug: up, back, down, forward.",
+    "description": "Slow circular shrug: up, down.",
     "howToDo": [
       "Lift shoulders up toward ears.",
-      "Roll them backward and down.",
-      "Continue forward to complete circle.",
+      "Lower them back and down in a circular motion.",
       "Perform three clockwise, three counter-clockwise."
     ],
-    "trackingMetric": "Path of shoulder landmark hits four quadrants (up/back/down/front).",
+    "trackingMetric": "Path of shoulder landmark hits four quadrants (up/down).",
     "matchRule": "detect ≥ 1 full clockwise revolution within 4 s",
     "holdSecs": 0,
     "benefit": "Lubricates shoulder joints and reduces stiffness."

@@ -120,6 +120,17 @@ const AVAILABLE_EXERCISES = {
             throw new Error('THORACIC_EXTENSION_WORKFLOW not loaded');
         }
         return THORACIC_EXTENSION_WORKFLOW;
+    },    'shoulder_rolls': () => {
+        if (typeof SHOULDER_ROLLS_WORKFLOW === 'undefined') {
+            throw new Error('SHOULDER_ROLLS_WORKFLOW not loaded');
+        }
+        return SHOULDER_ROLLS_WORKFLOW;
+    },
+    'seated_side_bend': () => {
+        if (typeof SEATED_SIDE_BEND_WORKFLOW === 'undefined') {
+            throw new Error('SEATED_SIDE_BEND_WORKFLOW not loaded');
+        }
+        return SEATED_SIDE_BEND_WORKFLOW;
     }
 };
 
