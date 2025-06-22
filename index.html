@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MediaPipe Live Pose Tracker</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; }
+    #container { position: relative; width: 640px; height: 480px; margin: auto; }
+    video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+    #message {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 14px;
+      z-index: 2;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div id="message">Ensure you're on HTTPS and have granted camera permission.</div>
+    <video id="input_video" autoplay muted playsinline></video>
+    <canvas id="output_canvas"></canvas>
+  </div>
+
+  <!-- MediaPipe JS libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js"></script>
+  <script src="lateral_neck_tilt.js"></script>
+  <script>
+    const videoElement = document.getElementById('input_video');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const messageEl = document.getElementById('message');
+    
+    // Exercise state management
+    let currentStep = 0; // 0: initial, 1: left tilt, 2: right tilt, 3: complete
+    let stepStartTime = null;
+    let stepHoldTime = 0;
+    const HOLD_DURATION = 2000; // 2 seconds hold required
+    
+    const stepNames = [
+      "Position yourself straight - shoulders and head level",
+      "Tilt your head to the LEFT",
+      "Tilt your head to the RIGHT", 
+      "Exercise Complete! Well done!"
+    ];
+    
+    const checkFunctions = [
+      checkInitialPosition,
+      checkLeftTilt,
+      checkRightTilt,
+      null // complete state
+    ];
+    
+    // Initialize MediaPipe Pose
+    const pose = new Pose({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
+    });
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      smoothSegmentation: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+    pose.onResults(onResults);
+
+    // Draw results on canvas
+    function onResults(results) {
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+      
+      // Update message with current step
+      updateStepMessage();
+      
+      if (results.poseLandmarks) {
+        drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { lineWidth: 1 });
+        drawLandmarks(canvasCtx, results.poseLandmarks, { lineWidth: 1, radius: 1, color: '#FF0000'});
+        
+        // Process current step
+        if (currentStep < 3) {
+          const checkFunction = checkFunctions[currentStep];
+          const result = checkFunction(results.poseLandmarks);
+          
+          if (result.ok) {
+            // Position is correct, start/continue timing
+            if (stepStartTime === null) {
+              stepStartTime = Date.now();
+            }
+            stepHoldTime = Date.now() - stepStartTime;
+            
+            // Check if held long enough
+            if (stepHoldTime >= HOLD_DURATION) {
+              // Move to next step
+              currentStep++;
+              stepStartTime = null;
+              stepHoldTime = 0;
+              console.log(`✅ Step ${currentStep} completed`);
+            }
+          } else {
+            // Position incorrect, reset timer
+            stepStartTime = null;
+            stepHoldTime = 0;
+            console.log(`❌ Step ${currentStep + 1}:`, result.issues);
+          }
+        }
+      }
+      canvasCtx.restore();
+    }
+    
+    function updateStepMessage() {
+      const stepText = stepNames[currentStep];
+      let progressText = "";
+      
+      if (currentStep < 3 && stepStartTime !== null) {
+        const remaining = Math.max(0, HOLD_DURATION - stepHoldTime);
+        progressText = ` - Hold for ${(remaining / 1000).toFixed(1)}s`;
+      }
+      
+      messageEl.textContent = `Step ${currentStep + 1}/3: ${stepText}${progressText}`;
+      
+      // Color coding
+      if (currentStep === 3) {
+        messageEl.style.background = 'rgba(0,128,0,0.8)'; // Green for complete
+      } else if (stepStartTime !== null) {
+        messageEl.style.background = 'rgba(255,165,0,0.8)'; // Orange for holding
+      } else {
+        messageEl.style.background = 'rgba(0,0,0,0.6)'; // Default
+      }
+    }
+
+    // Start camera with error handling
+    try {
+      const camera = new Camera(videoElement, {
+        onFrame: async () => await pose.send({ image: videoElement }),
+        width: 640,
+        height: 480
+      });
+      camera.start().catch(error => handleCameraError(error));
+    } catch (error) {
+      handleCameraError(error);
+    }
+
+    function handleCameraError(error) {
+      console.error('Camera start failed:', error);
+      messageEl.textContent = `Error accessing camera: ${error.message}. Please check HTTPS and permissions.`;
+      messageEl.style.background = 'rgba(255,0,0,0.7)';
+    }
+  </script>
+</body>
+</html>
